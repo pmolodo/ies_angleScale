@@ -1,0 +1,35 @@
+# ==============
+# Rooted folders
+# ==============
+
+# Made by pip
+/.cache/
+
+/.cmake/
+
+# ==============
+# Rooted files
+# ==============
+
+# The .env file for use with the vscode python plugin - no way to make it
+# cross platform, so needs to be setup per user
+/.env
+/deps/*.packman.xml.user
+/.pki
+
+# ==============
+# Folders - anywhere
+# ==============
+
+__pycache__/
+# Made by JetBrains IDEs
+.idea/
+.bash_history
+.mypy_cache
+
+# ==============
+# Files - anywhere
+# ==============
+# made by vscode's intellisense
+BROWSE.VC.DB*
+
