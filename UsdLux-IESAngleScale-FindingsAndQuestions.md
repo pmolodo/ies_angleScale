@@ -1,44 +1,39 @@
 # ies:AngleScale - findings and questions
 
-As part of the work to [more explicitly specify the behavior of UsdLux
-lights](https://github.com/PixarAnimationStudios/OpenUSD/pull/3182), I needed
-to determine what the exact formula for applying the
-[ies:angleScale][ies_angleScale_doc] attribute should be.
+While working to [explicitly specify
+UsdLux](https://github.com/PixarAnimationStudios/OpenUSD/pull/3182), we needed
+to determine the formula for applying the [ies:angleScale][ies_angleScale_doc].
 
 The [version we settled on for our initial PR][pr_iesAngleScale_formula] was:
 
 $$ \theta_{ies} = \frac{\theta_{light} - \pi}{1 + angleScale} + \pi $$
 
-This formula was chosen largely because it seems to match the behavior of how
-RenderMan applies `ies:angleScale`, which is presumably where the attribute [has
-it's roots][rman_profile_scale_doc].
+This formula was chosen because it matches the behavior of how RenderMan applies
+`ies:angleScale`, as the attribute is presumably derived from the [profile scale
+attribute in Renderman.][rman_profile_scale_doc].
 
-However, this choice has still has several drawbacks, so we thought we should
-share our findings, and solicit advice on the best way to handle this attribute.
+However, this choice has several drawbacks, so we thought we should share our
+findings and solicit advice.
 
 ## Visualization
 
 To help visualize the effect of the angleScale, I created a [test .ies
-file][ies_test_file]consisting of bands of alternating dark/light horizontal
-stripes, to show the effect of shifting the the ies range.  The bottom
-(verticalAngle=0) is always .25 (gray-black) and the top (verticalAngle=180) is
-always .75 (gray-white). (The horizontal angle space is also divided into
-quadrants, to show horizontal-angle light orientation, but we can ignore
-horizontal-angle differences for this discussion.)
+file][ies_test_file] consisting of bands of alternating dark/light horizontal
+stripes.  The bottom (verticalAngle=0) is always .25 (gray-black) and the top
+(verticalAngle=180) is always .75 (gray-white). (The horizontal angle space is
+also divided into quadrants, but we can ignore horizontal-angle differences for
+this discussion.)
 
-I then rendered a light with this ies file applied twice, once showing vertical
-angles 0-90 (the bottom half), and once showing vertical angles 90-180 (the top
-half) and stiched them together, to generate an output that looks something like
-this with no angleScale applied:
+I then placed a light with this IES profile at the center of a sphere, and
+rendered the interior of the sphere, from verticalAngle 0° to 180°, to generate
+an output that looks like this with no angleScale applied:
 
 <img src="https://pmolodo.github.io/luxtest/img/iesTest-ris.0011.png" title="IES
 Test Profile Render Reference" height="200"> \
 [\[exr\]][ies_test_ref_exr]
 
-(The exact `.usda` rendered can be found [here][iesTest_usda]; frame 11 was used
-to create the reference render above (`angleScale=0`), while frames 11-20 show a
-progression from `angleScale=-1` to `angleScale=1`.  [This repo][luxtest_repo]
-was used to perform the rendering.)
+More details on exact rendering procedure can be found in
+[this repo][luxtest_repo].
 
 ## Existing formulas
 
@@ -47,6 +42,10 @@ was used to perform the rendering.)
 As noted above, RenderMan appears to use this formula:
 
 $$ \theta_{ies} = \frac{\theta_{light} - \pi}{1 + angleScale} + \pi $$
+
+...which can be rewritten as:
+
+$$ (\theta_{ies} - \pi)\, (1 + angleScale) = (\theta_{light} - \pi) $$
 
 ...from which we can see that the relation is a simple scale by
 $(1 + angleScale)$, offset so the scale origin is at $(\theta_{light},\ \theta_{ies}) = (\pi,\ \pi)$.
@@ -72,7 +71,7 @@ negative values of angleScale:
 $$
 \theta_{ies} =
 \begin{dcases}
-    \frac{\theta_{light}}{1 - angleScale},  & \text{if} \quad 0 \leq angleScale < 1 \\
+    \frac{\theta_{light}}{1 - angleScale},  & \text{if} \quad 0 < angleScale < 1 \\
     \theta_{light} \, (1 + angleScale),     & \text{if} \quad -1 < angleScale < 0   \\
     0,                                      & \text{otherwise}    \\
 \end{dcases}
@@ -102,16 +101,15 @@ $(\theta_{light},\ \theta_{ies}) = (0,\ 0)$:
 Both of these are create linear relationships between $\theta_{light}$ and
 $\theta_{ies}$, with the exact scaling factor depending on $angleScale$.
 
-Further, they both have a fixed origin, though the origin varies between the
+Further, they both have a fixed scale-origin, though the origin varies between the
 two:
 - Renderman scale origin: $\theta = \pi$
 - Karma scale origin: $\theta = 0$
 
-The scaling origin angle matters because, in the common case of a "spotlight"
-(or any light with a maximum brightness centered in a particular direction), the
-`ies:angleScale` will behave in a manner artists will likely find intuitive,
-*if* the ies profile is primarily "aimed" in the direction matching the
-scale origin.
+In the common case of a "spotlight" (or any light with a maximum brightness
+centered in a particular direction), the scaling origin direction matters
+because, if the scaling origin direction aligns with the light's primary axis,
+`ies:angleScale` will behave in a manner artists will likely find intuitive.
 
 That is, if we have a spotlight where
 
@@ -123,27 +121,26 @@ doors on a light.
 
 However, if the primary axis is NOT aligned to the scaleOrigin, then altering
 the `ies:angleScale` will make the light behave in a way that is likely less
-intuitive or useful.
+intuitive or useful for lighters.
 
-This means that each of these will work "best" (ie, behave in a manner likely
-most intuitive for an artist) for only a certain subset of spotlights, and
-*neither* will work "intuitively" for all lights:
+This means that each of these will work "best" for only a certain subset of
+spotlights, and *neither* will work "intuitively" for all lights:
 
 - RenderMan formula:
   - works best for spotlights aimed "up"
-  - ie, maximum brightness centered around $verticalAngle = 180$
+  - ie, maximum brightness centered around $verticalAngle = 180°$
     ($\theta = \pi$)
 - Karma formula:
   - works best for spotlights aimed "down"
-  - ie, maximum brightness centered around $verticalAngle = 0$ ($\theta = 0$)
+  - ie, maximum brightness centered around $verticalAngle = 0°$ ($\theta = 0$)
 
 #### Which is more common - spotlights aimed up or down?
 
-If [ieslibrary.com](ieslibrary.com) is indicative, lights aimed down are much
-more common - an ad-hoc perusal indicates that if a light has a "primary
-direction", down is the by far the most common. Even the way that site set
-up the preview renders indicates "downward" aimed lights are most common, as
-lights aimed in other directions are poorly framed:
+If [ieslibrary.com](ieslibrary.com) is indicative, lights aimed **down** are
+much more common - an ad-hoc perusal indicates that if a light has a "primary
+direction", down is the by far the most common. They are apparently common
+enough that the site maker designed their preview images assuming the light is
+aimed downward, as lights aimed in other directions are poorly framed:
 
 | Aimed down (vangle 0°)    | Aimed Side (vangle 90°)   | Aimed Up (vangle 180°) |
 | ------------------------- | ------------------------- | ---------------------- |
@@ -181,28 +178,29 @@ Unfortunately, I don't think either option is a clear winner, mostly because:
 
 ## Alternative Formulas
 
-Here are 3 proposals for alternative formulas:
+Given that bot the RenderMan and Karma formulas have significant drawbacks,
+here are 3 proposals for alternative formulas:
 
 ### A. Bimodal - Scaling Origin at 0° for angleScale > 0, 180° for angleScale < 0
 
 This would allow us to support behavior "similar" to either of the current Karma
 or RenderMan formulas, without having to add any new attributes.
 
-**Formula:**
+**Mathematical Description:**
 $$
 \theta_{ies} =
 \begin{dcases}
     \frac{\theta_{light}}{angleScale},
-        & \text{if} \quad angleScale \geq 0 \\
+        & \text{if} \quad angleScale > 0 \\
     \frac{\theta_{light} - \pi}{-angleScale} + \pi,
         & \text{if} \quad angleScale < 0   \\
 \end{dcases}
 $$
 
 Pros:
-- work "intuitively" with lights aimed either up OR down
-- requires no additional attributes
-- provides a backwards-compatible mapping for either RenderMan or Karma
+- Works "intuitively" with lights aimed either up OR down
+- Requires no additional attributes
+- Provides a backwards-compatible mapping for either RenderMan or Karma
 
 Cons:
 - Doesn't work "intuitively" with ALL lights (ie, lights aimed to the side)
@@ -212,26 +210,28 @@ Cons:
 
 ### B. Add `vAngleScaleOrigin` attribute
 
-By adding one additional attribute, we could allow setting any vertical angle
-as the scale origin, providing a more intuitive way to support lights aimed
-either up or down, as well "quasi" support for a light aimed in any direction
-(ie, with distorted scaling, since we still only scale in the vertical
-direction.)
-
 **New Attributes:** (exact names TBD)
 - `float inputs:shaping:ies:vAngleScaleOrigin = 0`
   - Valid Range: $[0, 180]$
   - Units: degrees
 
-**Formula:**
+By adding one additional attribute, we could allow setting any vertical angle
+as the scale origin, providing a more intuitive way to support lights aimed
+either up or down, as well as "partial" support for a light aimed in any
+direction (ie, we can locate the scaling origin in the correct place, but the
+scaling for lights aimed sideways will be distorted, since we still only alter
+the  verticalAngle / $\theta$, and leave the horizontalAngle / $\phi$
+untouched.)
+
+**Mathematical Description:**
 $$
 \theta_{ies} =
     \frac{\theta_{light} - vAngleScaleOrigin}{angleScale} + vAngleScaleOrigin
 $$
 
 Pros:
-- can work "intuitively" with lights aimed either up OR down
-- provides a backwards-compatible mapping for either RenderMan or Karma
+- Can work "intuitively" with lights aimed either up OR down
+- Provides a backwards-compatible mapping for either RenderMan or Karma
 - Provides an "easy" path to later supporting "any" aim direction in the future
   (by adding `hAngleScaleOrigin` and `angleScaleDirection` - see
   [Option C][option_C])
@@ -244,9 +244,8 @@ Cons:
   oval
 
 Notes:
-- We have the option (now or in the in the future) to allow "auto-dectection" of
-  `vAngleScaleOrigin` (ie, angle that splits ies profile energy distribution
-  equally on either side), by, ie, setting `vAngleScaleOrigin = -1`
+- In the future, we could possibly allow "auto-dectection" of
+  `vAngleScaleOrigin` by, ie, setting `vAngleScaleOrigin = -1`
 
 ### C. Add `vAngleScaleOrigin`, `hAngleScaleOrigin`, and `angleScaleDirection` attributes
 
@@ -261,50 +260,55 @@ Notes:
 - `token inputs:shaping:ies:angleScaleDirection = "radial"`
   - Valid Values: ["vertical", "radial"]
 
-The idea is that by setting `angleScaleDirection` to `radial`, we would allow
-circular profile scaling about any aribtrary direction, which would allow for
-"intuitive" profile scaling for any type of spotlight.  The inclusion of
-`angleScaleDirection` as an option here is more to provide a backwards
-compatibility path to existing behavior by setting it to `vertical` - the
-attribute could be dropped if we don't care about maintaining a backwards-
-compatible mapping.  (We could also provide a `horizontal` option for symmetry
-with the `vertical` option, though I suspect it's usage would be limited.)
+By setting `angleScaleDirection` to `radial`, we would remap BOTH vertical
+angles and horizontal angles, to allow circular profile scaling about any
+aribtrary direction, and "intuitive" profile scaling for any type of spotlight
+(by setting `vAngleScaleOrigin` and `hAngleScaleOrign` to align with the
+profile's "primary" axis).  The inclusion of `angleScaleDirection` as an option
+allows a backwards-compatible mapping to existing behavior by setting it to
+`vertical` - the attribute could be dropped if we don't care about maintaining a
+backwards-compatible mapping.
 
-**Formula:**
+**Mathematical Description:**
 
-If `angleScaleDirection = "vertical"`, then `hAngleScaleOrigin` is ignored, and
-the formula is the same as in [Option B][option_b] above.
+- If `angleScaleDirection = "vertical"`:
+    - then `hAngleScaleOrigin` is ignored, and the formula is the same as in
+      [Option B][option_b] above.
 
-If `angleScaleDirection = "radial"`, then let 
+- If `angleScaleDirection = "radial"`:
+    - then let
+      $$
+            R(\theta,\ \phi) \rightarrow (\theta',\ \phi')
+      $$
 
-$$
-    R(\theta,\ \phi) \rightarrow (\theta',\ \phi')
-$$
+      represent the shortest-angle rotation of the
+      $(vScaleOrigin, hScaleOrigin)$ direction to align with the the
+      $\theta = 0$ axis, where $(\theta',\ \phi')$ is the image of
+      $(\theta,\ \phi)$ after this rotation.
 
-represent the shortest-angle rotation of the $(vScaleOrigin, hScaleOrigin)$
-direction to align with the the $\theta = 0$ axis,
-where $(\theta',\ \phi')$ is the image of $(\theta,\ \phi)$ after this rotation.
+    - To translate from $(\theta_{light}, \phi_{light})$ to
+      $(\theta_{ies}, \phi_{ies})$, we:
+        - perform a rotation by $R$
+          $$ (\theta_{light}',\ \phi_{light}') = R(\theta_{light},\ \phi_{light}) $$
 
-To translate from $(\theta_{light}, \phi_{light})$ to
-$(\theta_{ies}, \phi_{ies})$, we perform a rotation by $R$, scale the $\theta'$
-coordinate by `angleScale`, then inverse rotate by $R^{-1}$ to get back to our
-original spherical coordinate system:
+        - scale the $\theta'$ coordinate by `angleScale`:
+          $$
+          \begin{align*}
+              \theta_{ies}' &= \frac{\theta_{light}'}{angleScale} \\
+              \phi_{ies}' &= \phi_{light}'                        \\
+          \end{align*}
+          $$
+        -  then inverse rotate by $R^{-1}$ to get back to our original spherical
+           coordinate system:
 
-$$
-\begin{align*}
-    (\theta_{light}',\ \phi_{light}') &= R(\theta_{light},\ \phi_{light}) \\
-    \theta_{ies}' &= \frac{\theta_{light}'}{angleScale}                   \\
-    \phi_{ies}' &= \phi_{light}'                                           \\
-    (\theta_{ies},\ \phi_{ies}) &= R^{-1}(\theta_{ies}',\ \phi_{ies}')
-\end{align*}
-$$
+      $$ (\theta_{ies},\ \phi_{ies}) = R^{-1}(\theta_{ies}',\ \phi_{ies}') $$
 
 Pros:
 - can work "intuitively" with lights aimed in ANY direction
 - provides a backwards-compatible mapping for either RenderMan or Karma
 - can provide a possible upgrade path from [Option B][option_b], allowing an
   incremental upgrade path that we follow only if there is demand for
-  ies profile angle-scaling.
+  IES profile angle-scaling.
 
 Cons:
 - Requires 3 additional attribute
@@ -321,23 +325,6 @@ Cons:
 | Relation between angleScale and scaling control  | <ul><li>Negative: scale origin top<li>Positive: scale origin bottom<li>Abs < 1: narrower<li>Abs > 1: broader</ul> | <ul><li>< 1: narrower<li>> 1: broader</ul> | <ul><li>< 1: narrower<li>> 1: broader</ul> || Same formula for entire domain?                              | No                  | ***Yes***       | ***Yes***                 |
 | Allows backwards-compatible mapping for RenderMan and Karma? | Yes                 | Yes             | Yes                       |
 | Path to support spotlights aimed anywhere                    | Unknown             | Migrate to C    | Already Supported         |
-
-
-
-## Preferences:
-
-Formula Options:
-- RenderMan
-- Karma
-- A: Bimodal
-- B: Add vAngleScaleOrigin attr
-- C: Add 3 attrs (vAngleScaleOrigin, hAngleScaleOrigin, angleScaleDirection)
-
-Add your preferences below (or add a comment):
-
-| Name | Preference | Notes |
-| ---- | ---------- | ----- |
-| Paul Molodowitch  | B: Add vAngleScaleOrigin attr | This seems the best compromise between present needs (backwards campatible mapping for existing scenes assuming either RenderMan or Karma behavior) and future (providing intutitive profile scaling for lights in any direction).
 
 
 <!-- ################################ -->
